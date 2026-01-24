@@ -180,6 +180,7 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 	 * - Artist similarity (50 points max using Levenshtein)
 	 * - Extra words penalty (-5 points per extra word)
 	 * - Clean/radio version handling (±200 points based on explicit flag)
+	 * - Lyric video prioritization (when original doesn't contain special keywords)
 	 * 
 	 * @param candidate Track to score
 	 * @param normalizedOriginalTitle Normalized original title
@@ -193,6 +194,13 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 		
 		String normalizedCandidateTitle = normalize(candidate.getInfo().title);
 		String normalizedCandidateAuthor = normalize(candidate.getInfo().author);
+		
+		// Check if original title contains special keywords
+		boolean hasSpecialKeywords = normalizedOriginalTitle.contains("karaoke") ||
+		                             normalizedOriginalTitle.contains("beat") ||
+		                             normalizedOriginalTitle.contains("instrumental") ||
+		                             normalizedOriginalTitle.contains("acoustic") ||
+		                             normalizedOriginalTitle.contains("remix");
 		
 		// Title word matching (high weight - 100 points per matching word)
 		Set<String> originalTitleWords = Arrays.stream(normalizedOriginalTitle.split("\\s+"))
@@ -244,6 +252,23 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 			// If original is not explicit, slightly prefer clean versions
 			if (isCleanOrRadio) {
 				score += 50;
+			}
+		}
+		
+		// Prioritize lyric video over official video to avoid ads
+		// Only apply this logic if the original title doesn't contain special keywords
+		if (!hasSpecialKeywords) {
+			boolean isLyricVideo = normalizedCandidateTitle.contains("lyric") ||
+			                       normalizedCandidateTitle.contains("lyrics");
+			boolean isOfficialVideo = normalizedCandidateTitle.contains("official video") ||
+			                          normalizedCandidateTitle.contains("official music video");
+			
+			if (isLyricVideo && !isOfficialVideo) {
+				// Boost lyric videos to avoid ads commonly found in official videos
+				score += 150;
+			} else if (isOfficialVideo && !isLyricVideo) {
+				// Slightly penalize official videos when not needed
+				score -= 100;
 			}
 		}
 		
