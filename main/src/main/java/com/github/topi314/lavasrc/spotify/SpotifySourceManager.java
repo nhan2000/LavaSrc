@@ -58,6 +58,12 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 	public static final int ALBUM_MAX_PAGE_ITEMS = 50;
 	public static final String API_BASE = "https://api.spotify.com/v1/";
 	public static final String CLIENT_API_BASE = "https://spclient.wg.spotify.com/";
+	public static final String HOST_BASE = "";
+	public static final String ENDPOINT_API_PLAYLIST = HOST_BASE + "/api/process-playlist";
+	public static final String ENDPOINT_API_TRACK = HOST_BASE + "/api/process-track";
+	public static final String ENDPOINT_API_ARTIST = HOST_BASE + "/api/process-artist";
+	public static final String ENDPOINT_API_ALBUM = HOST_BASE + "/api/process-album";
+	public static final String X_API_KEY = "";
 	private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.178 Spotify/1.2.65.255 Safari/537.36";
 	public static final Set<AudioSearchResult.Type> SEARCH_TYPES = Set.of(AudioSearchResult.Type.ALBUM, AudioSearchResult.Type.ARTIST, AudioSearchResult.Type.PLAYLIST, AudioSearchResult.Type.TRACK);
 	private static final Logger log = LoggerFactory.getLogger(SpotifySourceManager.class);
@@ -421,6 +427,72 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 	}
 
 	public AudioItem getAlbum(String id, boolean preview) throws IOException {
+		// Call external API to process album
+		var albumUrl = "https://open.spotify.com/album/" + id;
+		
+		try {
+			var request = new HttpPost(ENDPOINT_API_ALBUM);
+			request.setHeader("Content-Type", "application/json");
+			request.setHeader("X-API-Key", X_API_KEY);
+			
+			var jsonPayload = "{\"url\":\"" + albumUrl + "\"}";
+			request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
+			
+			var json = LavaSrcTools.fetchResponseAsJson(this.httpInterfaceManager.getInterface(), request);
+			
+			if (json == null || !json.get("success").asBoolean(false)) {
+				log.error("Failed to fetch album from external API: {}", json != null ? json.get("data").get("message").text() : "null response");
+				return getAlbumFallback(id, preview);
+			}
+			
+			var data = json.get("data");
+			var albumName = data.get("name").text();
+			var tracksJson = data.get("tracks");
+			
+			var tracks = new ArrayList<AudioTrack>();
+			for (var trackData : tracksJson.values()) {
+				var trackInfo = new AudioTrackInfo(
+					trackData.get("title").text(),
+					trackData.get("author").text(),
+					trackData.get("length").asLong(0),
+					trackData.get("identifier").text(),
+					trackData.get("isStream").asBoolean(false),
+					trackData.get("uri").text(),
+					trackData.get("artworkUrl").text(),
+					trackData.get("isrc").text()
+				);
+				
+				tracks.add(new SpotifyAudioTrack(
+					trackInfo,
+					albumName,
+					albumUrl,
+					null,
+					null,
+					null,
+					preview,
+					this
+				));
+			}
+			
+			log.info("Loaded {} tracks from album '{}' via external API", tracks.size(), albumName);
+			
+			return new SpotifyAudioPlaylist(
+				albumName,
+				tracks,
+				ExtendedAudioPlaylist.Type.ALBUM,
+				albumUrl,
+				null,
+				null,
+				tracks.size()
+			);
+			
+		} catch (Exception e) {
+			log.error("Error calling external album API", e);
+			return getAlbumFallback(id, preview);
+		}
+	}
+	
+	private AudioItem getAlbumFallback(String id, boolean preview) throws IOException {
 		var json = this.getJson(API_BASE + "albums/" + id, false, this.preferAnonymousToken);
 		if (json == null) {
 			return AudioReference.NO_TRACK;
@@ -469,9 +541,9 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 		var playlistUrl = "https://open.spotify.com/playlist/" + id;
 		
 		try {
-			var request = new HttpPost("");
+			var request = new HttpPost(ENDPOINT_API_PLAYLIST);
 			request.setHeader("Content-Type", "application/json");
-			request.setHeader("X-API-Key", "");
+			request.setHeader("X-API-Key", X_API_KEY);
 			
 			var jsonPayload = "{\"url\":\"" + playlistUrl + "\"}";
 			request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
@@ -565,6 +637,72 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 	}
 
 	public AudioItem getArtist(String id, boolean preview) throws IOException {
+		// Call external API to process artist
+		var artistUrl = "https://open.spotify.com/artist/" + id;
+		
+		try {
+			var request = new HttpPost(ENDPOINT_API_ARTIST);
+			request.setHeader("Content-Type", "application/json");
+			request.setHeader("X-API-Key", X_API_KEY);
+			
+			var jsonPayload = "{\"url\":\"" + artistUrl + "\"}";
+			request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
+			
+			var json = LavaSrcTools.fetchResponseAsJson(this.httpInterfaceManager.getInterface(), request);
+			
+			if (json == null || !json.get("success").asBoolean(false)) {
+				log.error("Failed to fetch artist from external API: {}", json != null ? json.get("data").get("message").text() : "null response");
+				return getArtistFallback(id, preview);
+			}
+			
+			var data = json.get("data");
+			var artistName = data.get("name").text();
+			var tracksJson = data.get("tracks");
+			
+			var tracks = new ArrayList<AudioTrack>();
+			for (var trackData : tracksJson.values()) {
+				var trackInfo = new AudioTrackInfo(
+					trackData.get("title").text(),
+					trackData.get("author").text(),
+					trackData.get("length").asLong(0),
+					trackData.get("identifier").text(),
+					trackData.get("isStream").asBoolean(false),
+					trackData.get("uri").text(),
+					trackData.get("artworkUrl").text(),
+					trackData.get("isrc").text()
+				);
+				
+				tracks.add(new SpotifyAudioTrack(
+					trackInfo,
+					null,
+					null,
+					artistUrl,
+					null,
+					null,
+					preview,
+					this
+				));
+			}
+			
+			log.info("Loaded {} tracks from artist '{}' via external API", tracks.size(), artistName);
+			
+			return new SpotifyAudioPlaylist(
+				artistName,
+				tracks,
+				ExtendedAudioPlaylist.Type.ARTIST,
+				artistUrl,
+				null,
+				artistName,
+				tracks.size()
+			);
+			
+		} catch (Exception e) {
+			log.error("Error calling external artist API", e);
+			return getArtistFallback(id, preview);
+		}
+	}
+	
+	private AudioItem getArtistFallback(String id, boolean preview) throws IOException {
 		var json = this.getJson(API_BASE + "artists/" + id, false, this.preferAnonymousToken);
 		if (json == null) {
 			return AudioReference.NO_TRACK;
@@ -583,6 +721,63 @@ public class SpotifySourceManager extends MirroringAudioSourceManager implements
 	}
 
 	public AudioItem getTrack(String id, boolean preview) throws IOException {
+		// Call external API to process track
+		var trackUrl = "https://open.spotify.com/track/" + id;
+		
+		try {
+			var request = new HttpPost(ENDPOINT_API_TRACK);
+			request.setHeader("Content-Type", "application/json");
+			request.setHeader("X-API-Key", X_API_KEY);
+			
+			var jsonPayload = "{\"url\":\"" + trackUrl + "\"}";
+			request.setEntity(new StringEntity(jsonPayload, ContentType.APPLICATION_JSON));
+			
+			var json = LavaSrcTools.fetchResponseAsJson(this.httpInterfaceManager.getInterface(), request);
+			
+			if (json == null || !json.get("success").asBoolean(false)) {
+				log.error("Failed to fetch track from external API: {}", json != null ? json.get("data").get("message").text() : "null response");
+				return getTrackFallback(id, preview);
+			}
+			
+			var data = json.get("data");
+			var tracksJson = data.get("tracks");
+			
+			if (tracksJson.values().isEmpty()) {
+				return AudioReference.NO_TRACK;
+			}
+			
+			var trackData = tracksJson.index(0);
+			var trackInfo = new AudioTrackInfo(
+				trackData.get("title").text(),
+				trackData.get("author").text(),
+				trackData.get("length").asLong(0),
+				trackData.get("identifier").text(),
+				trackData.get("isStream").asBoolean(false),
+				trackData.get("uri").text(),
+				trackData.get("artworkUrl").text(),
+				trackData.get("isrc").text()
+			);
+			
+			log.info("Loaded track '{}' via external API", trackInfo.title);
+			
+			return new SpotifyAudioTrack(
+				trackInfo,
+				null,
+				null,
+				null,
+				null,
+				null,
+				preview,
+				this
+			);
+			
+		} catch (Exception e) {
+			log.error("Error calling external track API", e);
+			return getTrackFallback(id, preview);
+		}
+	}
+	
+	private AudioItem getTrackFallback(String id, boolean preview) throws IOException {
 		var json = this.getJson(API_BASE + "tracks/" + id, false, this.preferAnonymousToken);
 		if (json == null) {
 			return AudioReference.NO_TRACK;
