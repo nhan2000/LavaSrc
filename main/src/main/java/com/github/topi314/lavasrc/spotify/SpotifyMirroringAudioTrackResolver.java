@@ -21,14 +21,7 @@ import java.util.stream.Collectors;
 public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackResolver {
 
 	private static final Logger log = LoggerFactory.getLogger(SpotifyMirroringAudioTrackResolver.class);
-	private static final double DURATION_TOLERANCE = 0.15; // 15% tolerance for duration matching (matching NodeLink)
-	
-	// Special version keywords (matching NodeLink implementation)
-	private static final Set<String> SPECIAL_VERSION_KEYWORDS = Set.of(
-		"remix", "orchestral", "live", "cover", "acoustic", 
-		"instrumental", "karaoke", "radio", "edit", "extended", 
-		"slowed", "reverb", "remaster", "version"
-	);
+	private static final double DURATION_TOLERANCE = 0.05; // 5% tolerance for duration matching
 
 	private String[] providers = {
 		"ytsearch:\"" + MirroringAudioSourceManager.ISRC_PATTERN + "\"",
@@ -186,9 +179,7 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 	 * - Artist matching (100 points per artist)
 	 * - Artist similarity (50 points max using Levenshtein)
 	 * - Extra words penalty (-5 points per extra word)
-	 * - Special version matching/penalty
 	 * - Clean/radio version handling (±200 points based on explicit flag)
-	 * (Enhanced to match NodeLink scoring algorithm)
 	 * 
 	 * @param candidate Track to score
 	 * @param normalizedOriginalTitle Normalized original title
@@ -203,16 +194,12 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 		String normalizedCandidateTitle = normalize(candidate.getInfo().title);
 		String normalizedCandidateAuthor = normalize(candidate.getInfo().author);
 		
-		// Check for special versions in both tracks
-		Set<String> originalSpecialVersions = findSpecialVersions(normalizedOriginalTitle);
-		Set<String> candidateSpecialVersions = findSpecialVersions(normalizedCandidateTitle);
-		
 		// Title word matching (high weight - 100 points per matching word)
 		Set<String> originalTitleWords = Arrays.stream(normalizedOriginalTitle.split("\\s+"))
-			.filter(w -> w.length() > 1)  // Filter out single characters (matching NodeLink)
+			.filter(w -> w.length() > 0)
 			.collect(Collectors.toSet());
 		Set<String> candidateTitleWords = Arrays.stream(normalizedCandidateTitle.split("\\s+"))
-			.filter(w -> w.length() > 1)  // Filter out single characters (matching NodeLink)
+			.filter(w -> w.length() > 0)
 			.collect(Collectors.toSet());
 		
 		long titleMatches = originalTitleWords.stream()
@@ -244,28 +231,7 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 			.count();
 		score -= extraWords * 5;
 		
-		// Special version matching (matching NodeLink logic)
-		// If original has no special version but candidate does, penalize heavily
-		if (originalSpecialVersions.isEmpty() && !candidateSpecialVersions.isEmpty()) {
-			score -= 100; // Penalize for unwanted versions
-		}
-		// If both have special versions, they should match
-		else if (!originalSpecialVersions.isEmpty() && !candidateSpecialVersions.isEmpty()) {
-			long matchingVersions = originalSpecialVersions.stream()
-				.filter(candidateSpecialVersions::contains)
-				.count();
-			if (matchingVersions > 0) {
-				score += matchingVersions * 50; // Bonus for matching versions
-			} else {
-				score -= 75; // Penalty for mismatched versions
-			}
-		}
-		// If original has special version but candidate doesn't, mild penalty
-		else if (!originalSpecialVersions.isEmpty() && candidateSpecialVersions.isEmpty()) {
-			score -= 25;
-		}
-		
-		// Handle clean/radio versions based on explicit flag (matching NodeLink)
+		// Handle clean/radio versions based on explicit flag
 		boolean isCleanOrRadio = normalizedCandidateTitle.contains("clean") || 
 		                        normalizedCandidateTitle.contains("radio");
 		
@@ -287,11 +253,9 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 	/**
 	 * Normalize string for comparison by:
 	 * - Converting to lowercase
-	 * - Removing featured artist notations (feat., ft., featuring)
-	 * - Removing special characters and parentheses content
-	 * - Removing version indicators
+	 * - Removing featured artist notations (feat., ft.)
+	 * - Removing special characters
 	 * - Trimming whitespace
-	 * (Enhanced to match NodeLink normalization)
 	 * 
 	 * @param str String to normalize
 	 * @return Normalized string
@@ -301,30 +265,10 @@ public class SpotifyMirroringAudioTrackResolver implements MirroringAudioTrackRe
 			return "";
 		}
 		return str.toLowerCase()
-			.replaceAll("\\bfeat(uring)?\\.?\\b", "") // feat, featuring
-			.replaceAll("\\bft\\.?\\b", "") // ft, ft.
-			.replaceAll("\\bwith\\b", "") // with
-			.replaceAll("\\[.*?\\]", "") // Remove content in brackets
-			.replaceAll("\\(.*?\\)", "") // Remove content in parentheses
-			.replaceAll("[^\\w\\s]", "") // Remove special characters
-			.replaceAll("\\s+", " ") // Normalize spaces
+			.replaceAll("feat\\.?", "")
+			.replaceAll("ft\\.?", "")
+			.replaceAll("[^\\w\\s]", "")
 			.trim();
-	}
-	
-	/**
-	 * Find special version keywords in a string (matching NodeLink)
-	 * 
-	 * @param str String to search
-	 * @return Set of found keywords
-	 */
-	private Set<String> findSpecialVersions(String str) {
-		if (str == null) {
-			return Collections.emptySet();
-		}
-		String lowerStr = str.toLowerCase();
-		return SPECIAL_VERSION_KEYWORDS.stream()
-			.filter(lowerStr::contains)
-			.collect(Collectors.toSet());
 	}
 
 	/**
